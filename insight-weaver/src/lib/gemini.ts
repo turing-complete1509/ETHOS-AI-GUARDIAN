@@ -1,11 +1,15 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
-
 export async function generateBiasReport(metrics: any, fairnessStats: any) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+    
+    if (!API_KEY) {
+      return "Configuration Error: VITE_GEMINI_API_KEY is missing. Please check your .env file and ensure Vite has picked it up.";
+    }
+
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     const prompt = `
       You are an Ethical AI Auditor. Analyze the following model results and fairness metrics:
@@ -33,8 +37,8 @@ export async function generateBiasReport(metrics: any, fairnessStats: any) {
     const result = await model.generateContent(prompt);
     const response = await result.response;
     return response.text();
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Error:", error);
-    return "Error generating AI report. Please verify your API key and network connection.";
+    return `Error generating AI report: ${error.message || error.toString()}\nPlease verify your API key and network connection.`;
   }
 }
