@@ -1,0 +1,71 @@
+Metadata-Version: 2.4
+Name: ethos_ai_guardian
+Version: 0.1.0
+Summary: Ethos AI Guardian: Automated bias detection and mitigation for machine learning models.
+Author: Ethos AI Team
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: torch
+Requires-Dist: scikit-learn
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# Ethos AI Guardian
+
+Ethos AI Guardian is a powerful, automated bias detection and mitigation toolkit for machine learning models. Built specifically for data scientists, it provides a seamless pipeline to identify historical, confounding, and selection biases in your datasets, and mitigates them using state-of-the-art techniques.
+
+## Features
+
+- **Automated Bias Detection:** Quickly scan datasets for Statistical Parity, Disparate Impact, and Equal Opportunity differences.
+- **Deep Contextual Debiasing:** Pro-level Tabular Transformers to understand contextual bias in categorical and numerical features.
+- **Adversarial Mitigation:** Uses an adversarial debiasing architecture to enforce fairness without sacrificing predictive power.
+- **Pipelines:** Easy-to-use Scikit-Learn style pipelines for integrating into your existing workflow.
+
+## Installation
+
+You can install `ethos_ai_guardian` using pip:
+
+```bash
+pip install ethos_ai_guardian
+```
+
+## Quick Start
+
+```python
+import pandas as pd
+from ethos_ai_guardian import AntiBiasPipeline
+
+# Load your dataset
+df = pd.read_csv("your_data.csv")
+
+# Initialize the pipeline
+pipeline = AntiBiasPipeline(model_type='logistic')
+
+# Run automated bias mitigation
+results = pipeline.train_and_evaluate(
+    df=df, 
+    features=['age', 'income', 'education'], 
+    sensitive_attr='gender', 
+    target_col='approved'
+)
+
+print(results["fairness_metrics"])
+```
+
+## License
+
+MIT License
