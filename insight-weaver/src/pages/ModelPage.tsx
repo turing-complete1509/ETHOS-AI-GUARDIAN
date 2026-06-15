@@ -109,23 +109,33 @@ interface ResultEntry {
 
 const MetricBar = ({ label, value, color = "var(--primary)", delay = 0 }: {
   label: string; value: number; color?: string; delay?: number;
-}) => (
-  <div className="space-y-1.5">
-    <div className="flex justify-between text-[10px] font-bold">
-      <span className="text-muted-foreground uppercase tracking-wider">{label}</span>
-      <span style={{ color }}>{(value * 100).toFixed(1)}%</span>
+}) => {
+  // SPD (Bias) is a 0-1 fraction; show as % but cap bar and color appropriately
+  const isBiasMetric = label === "SPD (Bias)";
+  const displayPct = Math.min(Math.abs(value) * 100, 100);
+  const barColor = isBiasMetric
+    ? (displayPct > 10 ? "#f43f5e" : "#10b981")
+    : color;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-[10px] font-bold">
+        <span className="text-muted-foreground uppercase tracking-wider">{label}</span>
+        <span style={{ color: barColor }}>
+          {isBiasMetric ? `${displayPct.toFixed(1)}%` : `${(value * 100).toFixed(1)}%`}
+        </span>
+      </div>
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${displayPct}%` }}
+          transition={{ delay, duration: 0.8, ease: "easeOut" }}
+          className="h-full rounded-full"
+          style={{ background: barColor }}
+        />
+      </div>
     </div>
-    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${Math.min(value * 100, 100)}%` }}
-        transition={{ delay, duration: 0.8, ease: "easeOut" }}
-        className="h-full rounded-full"
-        style={{ background: color }}
-      />
-    </div>
-  </div>
-);
+  );
+};
 
 export default function ModelPage() {
   const {
