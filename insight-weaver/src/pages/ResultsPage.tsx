@@ -20,8 +20,9 @@ import { calculateFairnessMetrics } from "@/lib/metrics";
 import { generateBiasReport, getPipelineInsights } from "@/lib/gemini";
 
 // ── 3D Rotating Metric Cube ────────────────────────────────────────────────
-const MetricCube = ({ metrics, fairnessStats }: { metrics: any; fairnessStats: any }) => {
+const MetricCube = ({ metrics, fairnessStats, activeFairnessStats }: { metrics: any; fairnessStats: any; activeFairnessStats: any }) => {
   const [rotate, setRotate] = useState({ x: -20, y: 35 });
+  const fairnessFaceVal = Math.max(0, 1 - Math.abs(activeFairnessStats?.spd || 0));
 
   return (
     <div className="flex flex-col items-center justify-center p-8 bg-black/40 rounded-[3rem] border border-primary/20 shadow-glow relative overflow-hidden group h-full">
@@ -38,11 +39,11 @@ const MetricCube = ({ metrics, fairnessStats }: { metrics: any; fairnessStats: a
       >
         {[
           { label: "Accuracy",  val: metrics.accuracy,  color: "bg-emerald-500/20 border-emerald-500", transform: "translateZ(100px)" },
-          { label: "Fairness",  val: (1 - Math.abs(fairnessStats?.debiased?.spd || 0)), color: "bg-primary/20 border-primary", transform: "rotateY(180deg) translateZ(100px)" },
+          { label: "Fairness",  val: fairnessFaceVal,    color: "bg-primary/20 border-primary", transform: "rotateY(180deg) translateZ(100px)" },
           { label: "Precision", val: metrics.precision, color: "bg-blue-500/20 border-blue-500",   transform: "rotateY(90deg) translateZ(100px)" },
           { label: "Recall",    val: metrics.recall,    color: "bg-purple-500/20 border-purple-500", transform: "rotateY(-90deg) translateZ(100px)" },
           { label: "F1 Score",  val: metrics.f1,        color: "bg-amber-500/20 border-amber-500",  transform: "rotateX(90deg) translateZ(100px)" },
-          { label: "SPD",       val: 1 - Math.abs(fairnessStats?.debiased?.spd || 0), color: "bg-white/10 border-white/40", transform: "rotateX(-90deg) translateZ(100px)" },
+          { label: "SPD",       val: 1 - Math.abs(activeFairnessStats?.spd || 0), color: "bg-white/10 border-white/40", transform: "rotateX(-90deg) translateZ(100px)" },
         ].map((face, i) => (
           <div
             key={i}
@@ -224,9 +225,17 @@ export default function ResultsPage() {
     if (!dataset || sensitiveColumns.length === 0 || !targetColumn) return null;
     const originalM  = calculateFairnessMetrics(dataset.data, sensitiveColumns, targetColumn);
     const debiasedM  = debiasedDataset ? calculateFairnessMetrics(debiasedDataset.data, sensitiveColumns, targetColumn) : null;
+    
+    // Health: 100 minus penalty for SPD (0-100 scale) and DI deviation (0-50 scale)
+    const computeHealth = (m: typeof originalM) => {
+      const spdPenalty = Math.abs(m.spd) * 100;
+      const diPenalty  = Math.abs(1 - Math.min(1.2, m.di)) * 50;
+      return Math.round(Math.max(0, Math.min(100, 100 - spdPenalty - diPenalty)));
+    };
+    
     return {
-      original: { ...originalM, health: Math.round(100 - Math.abs(originalM.spd) * 200) },
-      debiased: debiasedM ? { ...debiasedM, health: Math.round(100 - Math.abs(debiasedM.spd) * 200) } : null,
+      original: { ...originalM, health: computeHealth(originalM) },
+      debiased: debiasedM ? { ...debiasedM, health: computeHealth(debiasedM) } : null,
     };
   }, [dataset, debiasedDataset, sensitiveColumns, targetColumn]);
 
@@ -351,7 +360,9 @@ print(classification_report(y_test, model.predict(X_test)))
     );
   }
 
-  const fairnessRating  = Math.round((1 - Math.abs(fairnessStats?.debiased?.spd || 0)) * 100);
+  // Use debiased stats if available, otherwise fall back to original
+  const activeFairnessStats = fairnessStats?.debiased || fairnessStats?.original;
+  const fairnessRating  = Math.round(Math.max(0, Math.min(100, 100 - Math.abs(activeFairnessStats?.spd || 0) * 100)));
   // If boost ran, show boosted accuracy as the headline predictive power
   const headlineAccuracy = boostedMetrics ? boostedMetrics.after : metrics.accuracy;
 
@@ -373,7 +384,7 @@ print(classification_report(y_test, model.predict(X_test)))
         />
         <KpiCard
           title="Latent Proxy Shift"
-          value={fairnessStats?.debiased?.wasserstein?.toFixed(3) || "0.000"}
+          value={activeFairnessStats?.wasserstein?.toFixed(3) || "0.000"}
           subtitle={debiasedDataset ? "Independence: High" : "Independence: Low"}
           icon={<Binary className="h-4 w-4" />}
         />
@@ -385,14 +396,14 @@ print(classification_report(y_test, model.predict(X_test)))
         />
         <KpiCard
           title="Statistical Bias (SPD)"
-          value={Math.abs(fairnessStats?.debiased?.spd || 0).toFixed(4)}
+          value={`${(Math.abs(activeFairnessStats?.spd || 0) * 100).toFixed(1)}%`}
           icon={<Gauge className="h-4 w-4" />}
         />
       </div>
 
       {/* ── 3D Cube + CDF ─────────────────────────────────────────────────── */}
       <div className="grid lg:grid-cols-2 gap-8 items-stretch">
-        <MetricCube metrics={metrics} fairnessStats={fairnessStats} />
+        <MetricCube metrics={metrics} fairnessStats={fairnessStats} activeFairnessStats={activeFairnessStats} />
 
         <div className="glass-card p-10 flex flex-col justify-between">
           <div className="flex justify-between items-center mb-8">
@@ -679,7 +690,7 @@ print(classification_report(y_test, model.predict(X_test)))
               <h4 className="text-xs font-black uppercase text-primary border-b border-primary/20 pb-2">Statistical Integrity</h4>
               {[
                 { label: "Fairness Score",   val: `${fairnessRating}%` },
-                { label: "Prediction Bias",  val: `${(Math.abs(fairnessStats?.debiased?.spd || 0) * 100).toFixed(2)}%` },
+                { label: "Prediction Bias (SPD)", val: `${(Math.abs(activeFairnessStats?.spd || 0) * 100).toFixed(1)}%` },
                 { label: "Stability Score",  val: fairnessStats?.debiased ? "99.5%" : "85.0%" },
                 ...(boostedMetrics ? [{ label: "Boosted Accuracy", val: `${(boostedMetrics.after * 100).toFixed(1)}%` }] : []),
               ].map((item, i) => (
