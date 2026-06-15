@@ -1,7 +1,7 @@
 import { useData } from "@/context/DataContext";
 import { PageHeader } from "@/components/PageHeader";
 import { KpiCard } from "@/components/KpiCard";
-import { LayoutDashboard, AlertTriangle, Copy, Hash, Type, Activity, ShieldCheck, Sparkles, Scale } from "lucide-react";
+import { LayoutDashboard, AlertTriangle, Copy, Hash, Type, Activity, ShieldCheck, Sparkles, Scale, Fingerprint, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import { useNavigate } from "react-router-dom";
@@ -35,6 +35,11 @@ export default function OverviewPage() {
 
   const healthScore = Math.max(0, Math.round(100 - (dataset.missingPct * 2) - (dataset.duplicateRows > 0 ? 5 : 0)));
   const ethicsScore = Math.max(0, Math.round(100 - (dataset.categoricalCols * 2.5))); // Simulated proxy
+
+  const piiKeywords = ['name', 'email', 'phone', 'address', 'zip', 'ssn', 'password', 'dob', 'id'];
+  const detectedPII = dataset.columnStats.filter(c => 
+    piiKeywords.some(keyword => c.name.toLowerCase().includes(keyword))
+  );
   
   return (
     <div className="max-w-7xl mx-auto space-y-10 pb-24">
@@ -95,6 +100,28 @@ export default function OverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* PII SCANNER */}
+      {detectedPII.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 border-rose-500/20 bg-rose-500/5 flex items-start gap-6">
+           <div className="p-4 rounded-2xl bg-rose-500/10 text-rose-500 shrink-0"><Fingerprint className="h-8 w-8" /></div>
+           <div className="flex-1">
+              <div className="flex items-center gap-3 mb-2">
+                 <h3 className="font-display font-black text-xl text-rose-500">PII Risk Detected</h3>
+                 <span className="px-3 py-1 rounded-full bg-rose-500 text-white text-[9px] font-black uppercase tracking-widest animate-pulse">Critical</span>
+              </div>
+              <p className="text-sm text-muted-foreground mb-6">Our security scanner found {detectedPII.length} dimensions that may contain Personally Identifiable Information (PII). It is recommended to mask or drop these columns before modelling to comply with GDPR/HIPAA.</p>
+              <div className="flex flex-wrap gap-2">
+                 {detectedPII.map(c => (
+                   <div key={c.name} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-black/40 border border-rose-500/20">
+                      <EyeOff className="h-3 w-3 text-rose-500" />
+                      <span className="text-xs font-mono">{c.name}</span>
+                   </div>
+                 ))}
+              </div>
+           </div>
+        </motion.div>
+      )}
 
       {/* ANALYSIS GRAPHS */}
       <div className="grid md:grid-cols-2 gap-8">

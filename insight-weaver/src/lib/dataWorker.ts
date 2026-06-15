@@ -173,8 +173,66 @@ function processRawData(data: any[], fileName: string) {
 }
 
 function finalizeAndSend(statsMap: Record<string, WorkerStats>, headers: string[], rows: number, fileName: string, data: any[]) {
+  // Helper to detect if a column is an ID/Name/PK column
+  const isIdCol = (h: string, type: "numeric" | "categorical" | "datetime" | "boolean") => {
+    const name = h.toLowerCase().trim();
+    const idPatterns = [
+      /^id$/i, 
+      /^ids$/i,
+      /candidate_?id/i, 
+      /applicant_?id/i, 
+      /employee_?id/i, 
+      /number_?id/i,
+      /^name$/i,
+      /^names$/i,
+      /^index$/i,
+      /_id$/
+    ];
+    if (idPatterns.some(p => p.test(name))) {
+      return true;
+    }
+    
+    if (
+      name.includes("candidate id") ||
+      name.includes("candidateid") ||
+      name.includes("applicant id") ||
+      name.includes("applicantid") ||
+      name.includes("employee id") ||
+      name.includes("employeeid") ||
+      name.includes("number id") ||
+      name.includes("numberid") ||
+      name.includes("candidate_id") ||
+      name.includes("applicant_id") ||
+      name.includes("employee_id") ||
+      name.includes("number_id")
+    ) {
+      return true;
+    }
+    
+    if (type !== "numeric") {
+      const uniqueCount = statsMap[h]?.uniqueSet?.size || 0;
+      if (uniqueCount === rows && rows > 5) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Pre-calculate column stats for type inference
+  const headersAndTypes = headers.map(h => {
+    const s = statsMap[h];
+    const type = inferTypeFromStats(s, rows);
+    return { h, type };
+  });
+
+  // Filter headers to keep only non-ID columns
+  const filteredHeaders = headers.filter(h => {
+    const match = headersAndTypes.find(item => item.h === h);
+    return match ? !isIdCol(h, match.type) : true;
+  });
+
   let missingTotal = 0;
-  const columnStats: ColumnStats[] = headers.map(h => {
+  const columnStats: ColumnStats[] = filteredHeaders.map(h => {
     const s = statsMap[h];
     missingTotal += s.missing;
     const type = inferTypeFromStats(s, rows);
@@ -202,7 +260,7 @@ function finalizeAndSend(statsMap: Record<string, WorkerStats>, headers: string[
     }
     
     score -= (s.missing / rows) * 40;
-    stat.relevanceScore = Math.max(0, score + (Math.random() * 5));
+    stat.relevanceScore = Math.max(0, score);
 
     if (type === "numeric" && s.numericValues.length > 0) {
       const n = s.numericValues.length;
@@ -226,13 +284,22 @@ function finalizeAndSend(statsMap: Record<string, WorkerStats>, headers: string[
     return stat;
   });
 
+  // Filter actual data records so keys are omitted completely
+  const filteredData = data.map(row => {
+    const newRow: Record<string, any> = {};
+    filteredHeaders.forEach(h => {
+      newRow[h] = row[h];
+    });
+    return newRow;
+  });
+
   const info: DatasetInfo = {
-    fileName, rows, columns: headers.length, missingTotal,
-    missingPct: (missingTotal / (rows * headers.length)) * 100,
+    fileName, rows, columns: filteredHeaders.length, missingTotal,
+    missingPct: (missingTotal / (rows * filteredHeaders.length)) * 100,
     duplicateRows: 0,
     numericCols: columnStats.filter(c => c.type === "numeric").length,
     categoricalCols: columnStats.filter(c => c.type !== "numeric").length,
-    columnStats, data, headers
+    columnStats, data: filteredData, headers: filteredHeaders
   };
 
   self.postMessage({ type: "complete", info });

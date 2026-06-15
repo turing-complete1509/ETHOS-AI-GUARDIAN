@@ -92,7 +92,7 @@ export function analyzeDataset(data: Record<string, any>[], fileName: string): D
     }
 
     score -= (missing / rows) * 40; 
-    stat.relevanceScore = Math.max(0, score + (Math.random() * 5)); 
+    stat.relevanceScore = Math.max(0, score); 
 
     if (type === "numeric") {
       let sum = 0, min = Infinity, max = -Infinity;

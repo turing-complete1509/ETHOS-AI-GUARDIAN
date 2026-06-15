@@ -1,21 +1,45 @@
 import { useData } from "@/context/DataContext";
 import { PageHeader } from "@/components/PageHeader";
-import { BarChart3 } from "lucide-react";
-import { motion } from "framer-motion";
+import { BarChart3, Sparkles } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ScatterChart, Scatter, CartesianGrid, LineChart, Line, Cell } from "recharts";
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageFooter } from "@/components/PageFooter";
+import { getPipelineInsights } from "@/lib/gemini";
 
 export default function EdaPage() {
-  const { dataset } = useData();
+  const { dataset, datasetDescription } = useData();
   const navigate = useNavigate();
   const [selectedCol, setSelectedCol] = useState<string>("");
   const [scatterX, setScatterX] = useState<string>("");
   const [scatterY, setScatterY] = useState<string>("");
+  
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const numericCols = useMemo(() => dataset?.columnStats.filter(c => c.type === "numeric").map(c => c.name) ?? [], [dataset]);
   const catCols = useMemo(() => dataset?.columnStats.filter(c => c.type !== "numeric").map(c => c.name) ?? [], [dataset]);
+
+  // Trigger Gemini API for variable-specific domain insights
+  useEffect(() => {
+    if (dataset && datasetDescription && selectedCol) {
+      setAiLoading(true);
+      setAiInsight(null);
+      const colStats = dataset.columnStats.find(c => c.name === selectedCol);
+      getPipelineInsights(datasetDescription, `EDA Variable Analysis - ${selectedCol}`, {
+        variable: selectedCol,
+        type: colStats?.type,
+        uniqueValues: colStats?.unique,
+        missingPercentage: colStats?.missingPct?.toFixed(1) + "%",
+        mean: colStats?.mean,
+        median: colStats?.median
+      }).then(res => {
+        setAiInsight(res);
+        setAiLoading(false);
+      }).catch(() => setAiLoading(false));
+    }
+  }, [selectedCol, dataset, datasetDescription]);
 
   // Auto-select first numeric column for immediate visualization
   useEffect(() => {
@@ -151,6 +175,32 @@ export default function EdaPage() {
         </motion.div>
 
         <div className="flex-1 space-y-6">
+          {/* AI Domain Insight */}
+          <AnimatePresence>
+            {datasetDescription && (selectedCol || aiInsight) && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: -10 }}
+                className="relative flex gap-6 p-6 rounded-3xl border bg-primary/5 border-primary/20 shadow-sm animate-fade-in"
+              >
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/20 text-primary z-10">
+                  <Sparkles className={`h-4 w-4 ${aiLoading ? "animate-pulse" : ""}`} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-display font-semibold mb-1 text-primary">AI Domain Insight: {selectedCol}</h3>
+                  {aiLoading ? (
+                    <p className="text-xs text-foreground/70 animate-pulse">Consulting knowledge models on dataset context and '{selectedCol}' semantics...</p>
+                  ) : aiInsight ? (
+                    <p className="text-xs text-foreground/80 leading-relaxed font-medium">{aiInsight}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No semantic insight generated for this feature.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="grid md:grid-cols-2 gap-6">
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} key={`chart-${selectedCol}`} className="glass-card p-5">
               <h3 className="font-display font-semibold text-sm mb-1">

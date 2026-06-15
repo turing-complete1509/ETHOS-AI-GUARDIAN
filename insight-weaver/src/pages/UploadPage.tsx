@@ -7,11 +7,13 @@ import { PageHeader } from "@/components/PageHeader";
 import { KpiCard } from "@/components/KpiCard";
 import { useNavigate } from "react-router-dom";
 import { PageFooter } from "@/components/PageFooter";
+import { toast } from "sonner";
 
 export default function UploadPage() {
-  const { setDataset, dataset } = useData();
+  const { setDataset, dataset, datasetDescription, setDatasetDescription } = useData();
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [tempDescription, setTempDescription] = useState("");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -29,6 +31,8 @@ export default function UploadPage() {
         setProgress(progress);
       } else if (type === "complete") {
         setDataset(info);
+        setTempDescription(""); // Reset temp description on new upload
+        setDatasetDescription(null); // Force user to enter a new one
         setLoading(false);
         worker.terminate();
       } else if (type === "error") {
@@ -178,11 +182,42 @@ export default function UploadPage() {
                <div className="px-4 py-1.5 rounded-full bg-muted text-[10px] font-bold uppercase tracking-widest">CSV Support</div>
                <div className="px-4 py-1.5 rounded-full bg-muted text-[10px] font-bold uppercase tracking-widest">Excel Support</div>
             </div>
+
             {error && <p className="text-sm text-destructive font-bold">{error}</p>}
           </div>
         </motion.div>
 
-        {dataset && (
+        {dataset && !datasetDescription && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8">
+            <div className="glass-card p-8 border-primary/50 border-2">
+              <h3 className="text-xl font-display font-black tracking-tighter mb-2">Provide Dataset Context</h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                To enable our AI engines to accurately audit and analyze your data, please provide a brief description.
+              </p>
+              <textarea 
+                className="w-full bg-card border border-border rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-none mb-4"
+                placeholder="Briefly describe what this dataset is about in 3-4 lines... (e.g. Employee hiring records from 2020-2023. Contains age, income, and performance metrics.)"
+                rows={4}
+                value={tempDescription}
+                onChange={(e) => setTempDescription(e.target.value)}
+              />
+              <button 
+                onClick={() => {
+                  if (tempDescription.trim().length > 10) {
+                    setDatasetDescription(tempDescription);
+                  } else {
+                    setError("Please provide a more detailed description (at least 10 characters).");
+                  }
+                }}
+                className="px-8 py-3 rounded-full bg-primary text-primary-foreground font-bold text-sm uppercase tracking-widest hover:scale-105 transition-all shadow-glow"
+              >
+                Submit Description
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {dataset && datasetDescription && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-12 space-y-8">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <KpiCard title="File" value={dataset.fileName} icon={<FileSpreadsheet className="h-4 w-4" />} />
@@ -228,7 +263,12 @@ export default function UploadPage() {
       {/* FOOTER SECTION */}
       {dataset && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-12">
-          <PageFooter nextLabel="Run Ethical Audit" nextUrl="/overview" />
+          <PageFooter 
+            nextLabel="Run Ethical Audit" 
+            nextUrl="/overview" 
+            disabled={!datasetDescription}
+            disabledMessage="A dataset context must be provided first"
+          />
         </motion.div>
       )}
 
@@ -267,6 +307,7 @@ export default function UploadPage() {
                       { name: "hired", type: "categorical", missing: 0, missingPct: 0, unique: 2 }
                     ]
                   });
+                  setDatasetDescription("A synthesized dataset representing historical hiring decisions. Contains typical demographic attributes along with financial and experience indicators. Used for demonstrating AI bias detection in recruitment processes.");
                   toast.success("Pro Research Dataset Loaded!");
                 }}
                 className="px-12 py-5 rounded-full bg-white text-primary border-2 border-primary font-black uppercase text-xs tracking-[0.2em] shadow-glow hover:bg-primary hover:text-white transition-all active:scale-95"

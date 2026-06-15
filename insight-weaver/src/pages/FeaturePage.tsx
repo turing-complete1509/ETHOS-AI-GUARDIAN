@@ -1,19 +1,41 @@
 import { useData } from "@/context/DataContext";
 import { PageHeader } from "@/components/PageHeader";
-import { Wrench, Sparkles, Zap, Fingerprint, Layers } from "lucide-react";
-import { motion } from "framer-motion";
-import { useState, useMemo } from "react";
+import { Wrench, Sparkles, Zap, Fingerprint, Layers, Rocket, CheckCircle2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useState, useMemo, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { PageFooter } from "@/components/PageFooter";
 import { calculateMutualInfo } from "@/lib/metrics";
+import { toast } from "sonner";
+import { getPipelineInsights } from "@/lib/gemini";
 
 export default function FeaturePage() {
-  const { dataset } = useData();
+  const { dataset, datasetDescription } = useData();
   const navigate = useNavigate();
   const [encoding, setEncoding] = useState<"onehot" | "label">("onehot");
   const [scaling, setScaling] = useState<"standard" | "minmax">("standard");
   const [corrThreshold, setCorrThreshold] = useState(0.8);
+
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Trigger Gemini API for feature engineering insights
+  useEffect(() => {
+    if (dataset && datasetDescription) {
+      setAiLoading(true);
+      setAiInsight(null);
+      getPipelineInsights(datasetDescription, "Vector Engineering & Feature Analysis", {
+        encodingType: encoding,
+        scalingType: scaling,
+        correlationThreshold: corrThreshold,
+        totalFeaturesCount: dataset.columns - 1,
+      }).then(res => {
+        setAiInsight(res);
+        setAiLoading(false);
+      }).catch(() => setAiLoading(false));
+    }
+  }, [dataset, datasetDescription, encoding, scaling, corrThreshold]);
 
   const featureImportance = useMemo(() => {
     if (!dataset) return [];
@@ -151,6 +173,32 @@ export default function FeaturePage() {
           * Importance is calculated via a simulated Gini Impurity reduction loop across all observation vectors.
         </p>
       </motion.div>
+
+      {/* AI Vector Engineering Insight */}
+      <AnimatePresence>
+        {datasetDescription && (aiInsight || aiLoading) && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, y: 10 }}
+            className="glass-card p-6 flex gap-6 border bg-primary/5 border-primary/20 shadow-sm animate-fade-in"
+          >
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-primary/20 text-primary z-10">
+              <Sparkles className={`h-4 w-4 ${aiLoading ? "animate-pulse" : ""}`} />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-display font-semibold mb-1 text-primary">AI Vector Engineering Auditor</h3>
+              {aiLoading ? (
+                <p className="text-xs text-foreground/70 animate-pulse">Analyzing vector representations and scaling choices for '{dataset.fileName}'...</p>
+              ) : aiInsight ? (
+                <p className="text-xs text-foreground/80 leading-relaxed font-medium">{aiInsight}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No vector semantic insight generated.</p>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <PageFooter nextLabel="Run Ethical Audit" nextUrl="/fairness" />
     </div>

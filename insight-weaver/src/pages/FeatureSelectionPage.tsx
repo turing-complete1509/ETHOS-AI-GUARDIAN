@@ -7,11 +7,15 @@ import { useNavigate } from "react-router-dom";
 import { PageFooter } from "@/components/PageFooter";
 import { Shield, ShieldPlus, ShieldCheck, X } from "lucide-react";
 import { calculateMutualInfo } from "@/lib/metrics";
+import { getPipelineInsights } from "@/lib/gemini";
 
 export default function FeatureSelectionPage() {
-  const { dataset, setDataset, safeList, toggleSafeColumn, selectionStep: step, setSelectionStep: setStep } = useData();
+  const { dataset, setDataset, safeList, toggleSafeColumn, selectionStep: step, setSelectionStep: setStep, datasetDescription } = useData();
 
   const initialColumns = dataset?.columns || 0;
+  
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const filter1Results = useMemo(() => {
     if (!dataset) return { kept: [], dropped: [] };
@@ -70,7 +74,21 @@ export default function FeatureSelectionPage() {
     
     setTimeout(() => setStep(2), 1500);
     setTimeout(() => setStep(3), 3000);
-    setTimeout(() => setStep(4), 4500);
+    setTimeout(() => {
+      setStep(4);
+      if (datasetDescription) {
+        setAiLoading(true);
+        getPipelineInsights(datasetDescription, "Feature Selection", {
+          droppedFeatures: filter3Results.dropped,
+          keptFeatures: filter3Results.kept.map(c => c.name),
+          avgMIKept: filter3Results.avgMIKept,
+          avgMIDropped: filter3Results.avgMIDropped
+        }).then(insight => {
+          setAiInsight(insight);
+          setAiLoading(false);
+        });
+      }
+    }, 4500);
   };
 
   const handleCommit = () => {
@@ -269,10 +287,31 @@ export default function FeatureSelectionPage() {
                   </div>
                 </motion.div>
               )}
-            </AnimatePresence>
+              </AnimatePresence>
+            </div>
           </div>
+          
+          {/* AI Insight Box */}
+          <AnimatePresence>
+            {step >= 4 && datasetDescription && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative flex gap-6 p-6 rounded-xl border bg-primary/5 border-primary/20 shadow-sm mt-4">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 z-10 bg-primary/20 text-primary">
+                  <Zap className={`h-5 w-5 ${aiLoading ? "animate-pulse" : ""}`} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-display font-semibold mb-1 text-primary">Gemini Contextual Insight</h3>
+                  {aiLoading ? (
+                    <p className="text-sm text-foreground/70 animate-pulse">Analyzing feature selection based on dataset context...</p>
+                  ) : aiInsight ? (
+                    <p className="text-sm text-foreground/80 leading-relaxed font-medium">{aiInsight}</p>
+                  ) : (
+                    <p className="text-sm text-foreground/70">No insight generated.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </div>
 
       <div className="mt-10 flex justify-center pb-12">
         {step === 0 ? (

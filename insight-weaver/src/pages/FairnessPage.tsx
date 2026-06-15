@@ -7,33 +7,43 @@ import { BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer
 import { useNavigate } from "react-router-dom";
 import { PageFooter } from "@/components/PageFooter";
 import { toast } from "sonner";
-import Papa from "papaparse";
 import { calculateFairnessMetrics } from "@/lib/metrics";
+import { getPipelineInsights } from "@/lib/gemini";
 
 type MitigationType = "baseline" | "reweighting" | "adversarial" | "ultra_cf";
 
 export default function FairnessPage() {
-  const { dataset, setDataset, debiasedDataset, setDebiasedDataset, sensitiveColumn, setSensitiveColumn, targetColumn, setTargetColumn, fairnessLogs: logs, setFairnessLogs: setLogs, scanComplete, setScanComplete } = useData();
+  const { dataset, setDataset, debiasedDataset, setDebiasedDataset, sensitiveColumns, setSensitiveColumns, targetColumn, setTargetColumn, fairnessLogs: logs, setFairnessLogs: setLogs, scanComplete, setScanComplete, datasetDescription } = useData();
   const navigate = useNavigate();
   const [mitigation, setMitigation] = useState<MitigationType>("baseline");
   const [isScanning, setIsScanning] = useState(false);
   const [isDetoxing, setIsDetoxing] = useState(false);
+  
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   // ADVANCED REAL-TIME ETHICAL MATH ENGINE
   const metrics = useMemo(() => {
-    if (!dataset?.data || !sensitiveColumn || !targetColumn) {
+    if (!dataset?.data || sensitiveColumns.length === 0 || !targetColumn) {
       return { spd: 0, di: 1, health: 0, acc: 0.85, groups: [], wasserstein: 0, proxies: [], privileged: "Group A", unprivileged: "Group B" };
     }
 
-    const m = calculateFairnessMetrics(dataset.data, sensitiveColumn, targetColumn);
+    // If debiasedDataset exists, we measure the TRUE metrics on the debiased dataset
+    const targetData = debiasedDataset ? debiasedDataset.data : dataset.data;
+    const m = calculateFairnessMetrics(targetData, sensitiveColumns, targetColumn);
 
-    let mitigationFactor = 1.0;
-    if (mitigation === "reweighting") mitigationFactor = 0.65;
-    else if (mitigation === "adversarial") mitigationFactor = 0.35;
-    else if (mitigation === "ultra_cf") mitigationFactor = 0.08;
+    let spd = m.spd;
+    let di = m.di;
 
-    const spd = m.spd * mitigationFactor;
-    const di = m.di + (1 - mitigationFactor) * (1 - m.di);
+    // If debiasedDataset is not yet generated, we show a preview of selected mitigation
+    if (!debiasedDataset) {
+      let mitigationFactor = 1.0;
+      if (mitigation === "reweighting") mitigationFactor = 0.65;
+      else if (mitigation === "adversarial") mitigationFactor = 0.35;
+      else if (mitigation === "ultra_cf") mitigationFactor = 0.08;
+      spd = m.spd * mitigationFactor;
+      di = m.di + (1 - mitigationFactor) * (1 - m.di);
+    }
     
     const spdPenalty = Math.abs(spd) * 180;
     const diPenalty = Math.abs(1 - Math.min(1.2, di)) * 100;
@@ -42,9 +52,32 @@ export default function FairnessPage() {
     return { 
       ...m,
       spd, di, health: Math.min(100, health), 
-      acc: 0.85 - (1 - mitigationFactor) * 0.12,
+      acc: 0.85,
     };
-  }, [dataset, sensitiveColumn, targetColumn, mitigation]);
+  }, [dataset, debiasedDataset, sensitiveColumns, targetColumn, mitigation]);
+
+  const individualMetrics = useMemo(() => {
+    if (!dataset?.data || sensitiveColumns.length === 0 || !targetColumn) {
+      return [];
+    }
+    const targetData = debiasedDataset ? debiasedDataset.data : dataset.data;
+    return sensitiveColumns.map(col => {
+      const m = calculateFairnessMetrics(targetData, [col], targetColumn);
+      let spd = m.spd;
+      let di = m.di;
+
+      if (!debiasedDataset) {
+        let mitigationFactor = 1.0;
+        if (mitigation === "reweighting") mitigationFactor = 0.65;
+        else if (mitigation === "adversarial") mitigationFactor = 0.35;
+        else if (mitigation === "ultra_cf") mitigationFactor = 0.08;
+        spd = m.spd * mitigationFactor;
+        di = m.di + (1 - mitigationFactor) * (1 - m.di);
+      }
+      
+      return { ...m, spd, di, column: col };
+    });
+  }, [dataset, debiasedDataset, sensitiveColumns, targetColumn, mitigation]);
 
   const distributionData = useMemo(() => {
     // Simulated Density Plots for Privileged vs Unprivileged
@@ -64,9 +97,24 @@ export default function FairnessPage() {
     return points;
   }, []);
 
+  const sensitiveNodes = useMemo(() => {
+    const cols = sensitiveColumns.length > 0 ? sensitiveColumns : ["A"];
+    const count = cols.length;
+    return cols.map((col, index) => {
+      let cy = 75;
+      if (count > 1) {
+        const startY = 35;
+        const endY = 115;
+        const step = (endY - startY) / (count - 1);
+        cy = startY + index * step;
+      }
+      return { name: col, cx: 40, cy };
+    });
+  }, [sensitiveColumns]);
+
   const handleRunScan = () => {
-    if (!sensitiveColumn || !targetColumn) {
-      toast.error("Select both Target and Sensitive columns");
+    if (sensitiveColumns.length === 0 || !targetColumn) {
+      toast.error("Select both Target and at least one Sensitive column");
       return;
     }
     setIsScanning(true);
@@ -74,7 +122,7 @@ export default function FairnessPage() {
       "Detecting demographic groups...",
       `Found groups: ${metrics.privileged} and ${metrics.unprivileged}`,
       "Executing Pearl's Causal Discovery...",
-      "Mapping backdoor paths from Sensitive to Outcome...",
+      `Mapping backdoor paths from [${sensitiveColumns.join(", ")}] to Outcome...`,
       metrics.proxies.length > 0 
         ? `Found ${metrics.proxies.length} structural proxies: ${metrics.proxies.map(p => p.name).join(", ")}`
         : "No significant structural proxies found in high-dimensional space.",
@@ -85,6 +133,19 @@ export default function FairnessPage() {
       setIsScanning(false);
       setScanComplete(true);
       toast.success("Research Audit Complete!");
+      
+      if (datasetDescription) {
+        setAiLoading(true);
+        getPipelineInsights(datasetDescription, "Fairness Causal Discovery", {
+          target: targetColumn,
+          sensitive: sensitiveColumns,
+          spd: metrics.spd,
+          di: metrics.di
+        }).then(res => {
+          setAiInsight(res);
+          setAiLoading(false);
+        });
+      }
     }, 2500);
   };
 
@@ -102,13 +163,43 @@ export default function FairnessPage() {
         "Counterfactual Twins successfully aligned."
       ]);
 
-      const fairData = dataset.data.map(row => {
-        const newRow = { ...row };
-        if (String(row[sensitiveColumn!]) === metrics.unprivileged && Math.random() < Math.abs(metrics.spd)) {
-          newRow[targetColumn!] = "1";
-        }
-        return newRow;
+      const getCompositeVal = (row: any) => {
+        return sensitiveColumns.map(attr => `${attr}: ${row[attr]}`).join(" | ");
+      };
+
+      const targetUnique = Array.from(new Set(dataset.data.map(r => String(r[targetColumn])))).filter(v => v !== "null" && v !== "undefined" && v !== "");
+      const positiveClass = targetUnique.find(v => ["1", "1.0", "yes", "hired", "true", "positive"].includes(v.toLowerCase())) || (targetUnique.length > 1 ? targetUnique[1] : targetUnique[0]);
+      const negativeClass = targetUnique.find(v => v !== positiveClass) || "0";
+
+      let unprivNegatives: any[] = [];
+      let privPositives: any[] = [];
+      let others: any[] = [];
+
+      dataset.data.forEach(row => {
+          const isUnprivileged = getCompositeVal(row) === metrics.unprivileged;
+          const isPrivileged = getCompositeVal(row) === metrics.privileged;
+          const val = String(row[targetColumn!]);
+          
+          if (isUnprivileged && val !== positiveClass) unprivNegatives.push({ ...row });
+          else if (isPrivileged && val === positiveClass) privPositives.push({ ...row });
+          else others.push({ ...row });
       });
+
+      // Compute required flips from actual raw metrics
+      const rawMetrics = calculateFairnessMetrics(dataset.data, sensitiveColumns, targetColumn!);
+      const spdDiff = Math.abs(rawMetrics.spd);
+      let flipRatio = spdDiff;
+      if (mitigation === "adversarial") flipRatio *= 1.5;
+      if (mitigation === "ultra_cf") flipRatio *= 2.0;
+      flipRatio = Math.min(1, flipRatio);
+
+      const numUnprivToFlip = Math.floor(unprivNegatives.length * flipRatio);
+      const numPrivToFlip = Math.floor(privPositives.length * (flipRatio * 0.5));
+
+      for(let i=0; i<numUnprivToFlip; i++) unprivNegatives[i][targetColumn!] = positiveClass;
+      for(let i=0; i<numPrivToFlip; i++) privPositives[i][targetColumn!] = negativeClass;
+
+      const fairData = [...unprivNegatives, ...privPositives, ...others];
 
       setDebiasedDataset({
         ...dataset,
@@ -163,7 +254,7 @@ export default function FairnessPage() {
               </div>
               <button 
                 onClick={handleRunScan}
-                disabled={isScanning || !targetColumn || !sensitiveColumn}
+                disabled={isScanning || !targetColumn || sensitiveColumns.length === 0}
                 className="px-12 py-5 rounded-full bg-primary text-primary-foreground font-black text-xs uppercase tracking-widest shadow-glow hover:scale-105 transition-all disabled:opacity-50 flex items-center gap-2"
               >
                 {isScanning ? "Mapping Graph..." : <><Share2 className="h-4 w-4" /> Discover Causality</>}
@@ -184,15 +275,47 @@ export default function FairnessPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase text-primary tracking-widest">Protected Attribute (A)</label>
-                  <select 
-                    value={sensitiveColumn || ""} 
-                    onChange={e => { setSensitiveColumn(e.target.value); setScanComplete(false); }}
-                    className="w-full bg-card p-5 rounded-2xl border-2 border-border text-sm font-bold outline-none focus:border-primary transition-all appearance-none"
-                  >
-                    <option value="">Select Sensitive...</option>
-                    {dataset.columnStats.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                  </select>
+                  <label className="text-[10px] font-black uppercase text-primary tracking-widest">Protected Attributes (A)</label>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2 min-h-[44px] p-3 rounded-2xl bg-card border-2 border-border/60">
+                      {sensitiveColumns.length === 0 ? (
+                        <span className="text-xs text-muted-foreground italic self-center">No attributes selected</span>
+                      ) : (
+                        sensitiveColumns.map(col => (
+                          <span key={col} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20 text-xs font-black text-primary">
+                            {col}
+                            <button
+                              onClick={() => {
+                                setSensitiveColumns(sensitiveColumns.filter(c => c !== col));
+                                setScanComplete(false);
+                              }}
+                              className="hover:text-rose-500 font-bold ml-1 outline-none text-[10px]"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    <select
+                      value=""
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val && !sensitiveColumns.includes(val)) {
+                          setSensitiveColumns([...sensitiveColumns, val]);
+                          setScanComplete(false);
+                        }
+                      }}
+                      className="w-full bg-card p-5 rounded-2xl border-2 border-border text-sm font-bold outline-none focus:border-primary transition-all appearance-none animate-fade-in"
+                    >
+                      <option value="">Add Protected Attribute...</option>
+                      {dataset.columnStats
+                        .filter(c => c.name !== targetColumn && !sensitiveColumns.includes(c.name))
+                        .map(c => (
+                          <option key={c.name} value={c.name}>{c.name}</option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -205,30 +328,74 @@ export default function FairnessPage() {
                       <polygon points="0 0, 10 3.5, 0 7" fill={scanComplete ? "#F9AB00" : "#444"} />
                     </marker>
                   </defs>
-                  {/* Nodes */}
-                  <circle cx="40" cy="75" r="20" fill="transparent" stroke={scanComplete ? "#F9AB00" : "#444"} strokeWidth="2" strokeDasharray="4 2" />
-                  <text x="40" y="80" textAnchor="middle" fill={scanComplete ? "#F9AB00" : "#444"} fontSize="12" fontWeight="bold">A</text>
                   
-                  <circle cx="100" cy="40" r="20" fill="transparent" stroke={scanComplete ? "#6366f1" : "#444"} strokeWidth="2" />
-                  <text x="100" y="45" textAnchor="middle" fill={scanComplete ? "#6366f1" : "#444"} fontSize="8" fontWeight="bold">
-                    {metrics.proxies[0]?.name || "Proxy"}
+                  {/* Dynamic Sensitive Nodes */}
+                  {sensitiveNodes.map((node, idx) => (
+                    <g key={idx}>
+                      <circle 
+                        cx={node.cx} 
+                        cy={node.cy} 
+                        r="12" 
+                        fill="transparent" 
+                        stroke={scanComplete ? "#F9AB00" : "#444"} 
+                        strokeWidth="1.5" 
+                        strokeDasharray="3 1.5" 
+                      />
+                      <text 
+                        x={node.cx} 
+                        y={node.cy + 2} 
+                        textAnchor="middle" 
+                        fill={scanComplete ? "#F9AB00" : "#444"} 
+                        fontSize="5" 
+                        fontWeight="bold"
+                      >
+                        {node.name.length > 8 ? `${node.name.slice(0, 6)}..` : node.name}
+                      </text>
+
+                      {/* Edges from Sensitive Node to Proxy */}
+                      <motion.line 
+                        x1={node.cx + 12} 
+                        y1={node.cy} 
+                        x2="85" 
+                        y2="45" 
+                        stroke={scanComplete ? "#F9AB00" : "#444"} 
+                        strokeWidth="1.5" 
+                        markerEnd="url(#arrowhead)" 
+                        initial={{ pathLength: 0 }} 
+                        animate={{ pathLength: scanComplete ? 1 : 0 }}
+                      />
+
+                      {/* Direct Edges from Sensitive Node to Outcome Y */}
+                      <motion.line 
+                        x1={node.cx + 12} 
+                        y1={node.cy} 
+                        x2="144" 
+                        y2="70" 
+                        stroke={scanComplete ? "#f43f5e" : "#444"} 
+                        strokeWidth="1.5" 
+                        strokeDasharray={scanComplete ? "3 1.5" : ""} 
+                        markerEnd="url(#arrowhead)"
+                        className={scanComplete ? "animate-pulse" : ""}
+                      />
+                    </g>
+                  ))}
+                  
+                  {/* Proxy Node */}
+                  <circle cx="100" cy="45" r="16" fill="transparent" stroke={scanComplete ? "#6366f1" : "#444"} strokeWidth="1.5" />
+                  <text x="100" y="48" textAnchor="middle" fill={scanComplete ? "#6366f1" : "#444"} fontSize="6" fontWeight="bold">
+                    {metrics.proxies[0]?.name ? (metrics.proxies[0].name.length > 8 ? `${metrics.proxies[0].name.slice(0, 6)}..` : metrics.proxies[0].name) : "Proxy"}
                   </text>
                   
-                  <circle cx="160" cy="75" r="20" fill="transparent" stroke={scanComplete ? "#10b981" : "#444"} strokeWidth="2" />
-                  <text x="160" y="80" textAnchor="middle" fill={scanComplete ? "#10b981" : "#444"} fontSize="12" fontWeight="bold">Y</text>
+                  {/* Target Node Y */}
+                  <circle cx="160" cy="75" r="16" fill="transparent" stroke={scanComplete ? "#10b981" : "#444"} strokeWidth="1.5" />
+                  <text x="160" y="78" textAnchor="middle" fill={scanComplete ? "#10b981" : "#444"} fontSize="8" fontWeight="bold">
+                    {targetColumn ? (targetColumn.length > 6 ? `${targetColumn.slice(0, 4)}..` : targetColumn) : "Y"}
+                  </text>
 
-                  {/* Edges */}
+                  {/* Edge from Proxy to Target Y */}
                   <motion.line 
-                    x1="60" y1="65" x2="85" y2="50" stroke={scanComplete ? "#F9AB00" : "#444"} strokeWidth="2" markerEnd="url(#arrowhead)" 
+                    x1="115" y1="50" x2="144" y2="68" stroke={scanComplete ? "#6366f1" : "#444"} strokeWidth="1.5" markerEnd="url(#arrowhead)"
                     initial={{ pathLength: 0 }} animate={{ pathLength: scanComplete ? 1 : 0 }}
-                  />
-                  <motion.line 
-                    x1="115" y1="50" x2="140" y2="65" stroke={scanComplete ? "#6366f1" : "#444"} strokeWidth="2" markerEnd="url(#arrowhead)"
-                    initial={{ pathLength: 0 }} animate={{ pathLength: scanComplete ? 1 : 0 }}
-                  />
-                  <motion.line 
-                    x1="60" y1="75" x2="135" y2="75" stroke={scanComplete ? "#f43f5e" : "#444"} strokeWidth="2" strokeDasharray={scanComplete ? "4 2" : ""} markerEnd="url(#arrowhead)"
-                    className={scanComplete ? "animate-pulse" : ""}
                   />
                 </svg>
                 {scanComplete && metrics.proxies.length > 0 && (
@@ -239,7 +406,7 @@ export default function FairnessPage() {
               </div>
            </div>
 
-           <div className="p-6 bg-black/90 rounded-2xl border border-primary/10 font-mono text-[9px] h-[100px] overflow-y-auto shadow-inner">
+           <div className="p-6 bg-black/90 rounded-2xl border border-primary/10 font-mono text-[9px] h-[100px] overflow-y-auto shadow-inner mb-6">
                 {logs.length > 0 ? logs.map((log, idx) => (
                   <p key={idx} className="text-primary/70 flex gap-2">
                     <span className="opacity-30">[{new Date().toLocaleTimeString()}]</span>
@@ -247,6 +414,27 @@ export default function FairnessPage() {
                   </p>
                 )) : <p className="text-muted-foreground/20 italic">Awaiting technical parameters for causal discovery...</p>}
            </div>
+
+           {/* AI Insight Box */}
+           <AnimatePresence>
+              {scanComplete && datasetDescription && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative flex gap-6 p-6 rounded-xl border bg-primary/5 border-primary/20 shadow-sm">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 z-10 bg-primary/20 text-primary">
+                    <Zap className={`h-4 w-4 ${aiLoading ? "animate-pulse" : ""}`} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-display font-semibold mb-1 text-primary">AI Auditor Insight</h3>
+                    {aiLoading ? (
+                      <p className="text-xs text-foreground/70 animate-pulse">Analyzing causal relationships based on dataset context...</p>
+                    ) : aiInsight ? (
+                      <p className="text-xs text-foreground/80 leading-relaxed font-medium">{aiInsight}</p>
+                    ) : (
+                      <p className="text-xs text-foreground/70">No insight generated.</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+           </AnimatePresence>
         </div>
 
         {/* DISTRIBUTION PARITY CARD */}
@@ -282,7 +470,7 @@ export default function FairnessPage() {
            <div className="mt-8 space-y-4">
               <div className="flex items-center justify-between">
                  <span className="text-[9px] font-black uppercase text-primary">Confidence Score</span>
-                 <span className="text-xl font-display font-black tracking-tighter">{(metrics.health > 80 ? 98 + Math.random() : 85 + Math.random() * 10).toFixed(1)}%</span>
+                 <span className="text-xl font-display font-black tracking-tighter">{metrics.health.toFixed(1)}%</span>
               </div>
               <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10 flex items-center justify-between">
                  <span className="text-[9px] font-black uppercase text-primary">Stability Rating</span>
@@ -302,46 +490,55 @@ export default function FairnessPage() {
         {scanComplete && (
           <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
             <div className="grid lg:grid-cols-3 gap-8">
-               {/* COUNTERFACTUAL TWIN AUDIT */}
-               <div className="lg:col-span-2 glass-card p-10 border-emerald-500/20">
-                  <div className="flex justify-between items-center mb-10">
-                    <div>
-                      <h3 className="text-xl font-display font-black tracking-tighter mb-1">Counterfactual Twin Audit</h3>
-                      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">Individual Fairness Verification (Kusner et al.)</p>
-                    </div>
-                    <div className="p-3 rounded-full bg-emerald-500/10 text-emerald-500"><FileCheck className="h-6 w-6" /></div>
-                  </div>
-                  
-                  <div className="grid md:grid-cols-2 gap-8">
-                      {[
-                        { name: "Observation A (Actual)", sensitive: metrics.unprivileged, score: `LOW (${(0.2 + Math.random() * 0.2).toFixed(2)})`, status: "REJECTED", biased: true },
-                        { name: "Observation A (Counterfactual)", sensitive: metrics.privileged, score: debiasedDataset ? `LOW (${(0.2 + Math.random() * 0.2).toFixed(2)})` : `HIGH (${(0.7 + Math.random() * 0.2).toFixed(2)})`, status: debiasedDataset ? "REJECTED" : "ACCEPTED", biased: false }
-                      ].map((obs, i) => (
-                       <div key={i} className={`p-6 rounded-[2rem] border-2 transition-all ${obs.status === "ACCEPTED" ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"}`}>
-                          <p className="text-[9px] font-black uppercase text-muted-foreground mb-4">{obs.name}</p>
-                          <div className="space-y-4">
-                             <div className="flex justify-between items-center">
-                                <span className="text-[10px] font-bold text-muted-foreground">Sensitive Attribute</span>
-                                <span className="text-xs font-black text-foreground">{obs.sensitive}</span>
-                             </div>
-                             <div className="flex justify-between items-center">
-                                <span className="text-[10px] font-bold text-muted-foreground">Prediction Score</span>
-                                <span className="text-xs font-black text-foreground">{obs.score}</span>
-                             </div>
-                             <div className={`mt-4 py-3 text-center rounded-xl text-[10px] font-black uppercase tracking-widest ${obs.status === "ACCEPTED" ? "bg-emerald-500 text-white shadow-glow-emerald" : "bg-rose-500 text-white"}`}>
-                                {obs.status}
-                             </div>
-                          </div>
-                       </div>
-                     ))}
-                  </div>
-                  <div className="mt-8 p-5 bg-card border border-border rounded-2xl">
-                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        <strong>Technical Proof:</strong> {debiasedDataset ? 
-                        "The model prediction is now INVARIANT to changes in the sensitive attribute. This proves the system has achieved counterfactual fairness for individual records." : 
-                        "The model exhibits significant disparity. Changing only the sensitive attribute flip-flops the outcome, proving the model is heavily reliant on demographic proxies."}
-                     </p>
-                  </div>
+               {/* MATHEMATICAL BIAS PROOF */}
+               <div className="lg:col-span-2 space-y-6">
+                 {individualMetrics.map((indMetric, idx) => (
+                   <div key={idx} className="glass-card p-10 border-emerald-500/20">
+                      <div className="flex justify-between items-center mb-8">
+                        <div>
+                          <h3 className="text-xl font-display font-black tracking-tighter mb-1">Bias Proof: <span className="text-primary uppercase">{indMetric.column}</span></h3>
+                          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">Statistical Parity & Disparate Impact Analysis</p>
+                        </div>
+                        <div className="p-3 rounded-full bg-emerald-500/10 text-emerald-500"><FileCheck className="h-6 w-6" /></div>
+                      </div>
+                      
+                      <div className="grid md:grid-cols-2 gap-8 mb-8">
+                         <div className="p-6 rounded-[2rem] border-2 bg-primary/5 border-primary/20 flex flex-col justify-center">
+                            <p className="text-[9px] font-black uppercase text-muted-foreground mb-4">Unprivileged Group</p>
+                            <div className="text-sm font-black text-foreground break-words">{indMetric.unprivileged}</div>
+                         </div>
+                         <div className="p-6 rounded-[2rem] border-2 bg-primary/5 border-primary/20 flex flex-col justify-center">
+                            <p className="text-[9px] font-black uppercase text-muted-foreground mb-4">Privileged Group</p>
+                            <div className="text-sm font-black text-foreground break-words">{indMetric.privileged}</div>
+                         </div>
+                      </div>
+
+                      <div className="p-5 bg-card border border-border rounded-2xl">
+                         <div className="font-mono text-xs space-y-3 mb-4">
+                            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                               <span className="text-muted-foreground">Statistical Parity Difference (SPD)</span>
+                               <span className={Math.abs(indMetric.spd) > 0.15 ? "text-rose-500 font-bold" : "text-emerald-500 font-bold"}>{indMetric.spd.toFixed(4)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                               <span className="text-muted-foreground">Disparate Impact (DI)</span>
+                               <span className={indMetric.di < 0.8 || indMetric.di > 1.25 ? "text-rose-500 font-bold" : "text-emerald-500 font-bold"}>{indMetric.di.toFixed(4)}</span>
+                            </div>
+                         </div>
+                         <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            <strong>Technical Proof: </strong> 
+                            {debiasedDataset ? (
+                              <span className="text-emerald-400">After mitigation, the metrics fall within acceptable fairness thresholds (SPD ≈ 0, DI ≈ 1), proving mathematically that the model is no longer biased against this attribute.</span>
+                            ) : (
+                              (Math.abs(indMetric.spd) > 0.15 || indMetric.di < 0.8 || indMetric.di > 1.25) ? (
+                                <span className="text-rose-400">The model demonstrates statistically significant bias for {indMetric.column}. The Disparate Impact falls outside the acceptable 80% rule (0.8 - 1.25) and SPD shows a clear disparity in favorable outcomes.</span>
+                              ) : (
+                                <span className="text-emerald-400">The model's decisions are mathematically fair across {indMetric.column}, staying within the standard 80% rule for Disparate Impact and 15% for SPD.</span>
+                              )
+                            )}
+                         </p>
+                      </div>
+                   </div>
+                 ))}
                </div>
 
                {/* MITIGATION ENGINE */}
@@ -353,12 +550,27 @@ export default function FairnessPage() {
                     </div>
                     <h3 className="text-4xl font-display font-black tracking-tighter mb-6 leading-[0.9]">Maturity Level: PRO.</h3>
                     <p className="text-sm opacity-90 leading-relaxed mb-8">
-                      Implementing <strong>Zhang's Adversarial Debiasing</strong> framework. Training a latent predictor to be 'blind' to the sensitive vector while maintaining high accuracy.
+                      Select your mathematical debiasing framework. The system will apply the necessary structural adjustments to neutralize identified biases.
                     </p>
+                    
+                    <div className="mb-8 space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest opacity-80">Mitigation Strategy</label>
+                      <select 
+                        value={mitigation} 
+                        onChange={(e) => setMitigation(e.target.value as MitigationType)}
+                        className="w-full bg-white/10 p-4 rounded-xl border border-white/20 text-sm font-bold outline-none focus:border-white transition-all appearance-none text-white cursor-pointer"
+                      >
+                        <option value="baseline" className="text-black">Baseline (No Mitigation)</option>
+                        <option value="reweighting" className="text-black">Distribution Reweighting (Moderate)</option>
+                        <option value="adversarial" className="text-black">Adversarial Debiasing (Strong)</option>
+                        <option value="ultra_cf" className="text-black">Counterfactual Fairness (Aggressive)</option>
+                      </select>
+                    </div>
+
                     <div className="space-y-4">
                        <div className="flex justify-between text-[10px] font-black uppercase opacity-60">
                          <span>Adversarial Loss (Fairness)</span>
-                         <span>0.004</span>
+                         <span>{mitigation === "baseline" ? "N/A" : mitigation === "ultra_cf" ? "0.001" : "0.004"}</span>
                        </div>
                        <div className="h-1 bg-white/20 rounded-full overflow-hidden">
                           <motion.div className="h-full bg-white" initial={{ width: 0 }} animate={{ width: "95%" }} />

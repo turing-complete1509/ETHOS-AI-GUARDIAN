@@ -29,6 +29,15 @@ export interface DatasetInfo {
   headers: string[];
 }
 
+export interface BoostedMetrics {
+  before: number;
+  after: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  logs: string[];
+}
+
 interface DataContextType {
   dataset: DatasetInfo | null;
   setDataset: (d: DatasetInfo | null) => void;
@@ -38,6 +47,8 @@ interface DataContextType {
   setTargetColumn: (c: string | null) => void;
   sensitiveColumn: string | null;
   setSensitiveColumn: (c: string | null) => void;
+  sensitiveColumns: string[];
+  setSensitiveColumns: (cols: string[]) => void;
   safeList: string[];
   setSafeList: (list: string[]) => void;
   toggleSafeColumn: (column: string) => void;
@@ -45,7 +56,9 @@ interface DataContextType {
   setDarkMode: (d: boolean) => void;
   modelResults: any | null;
   setModelResults: (r: any | null) => void;
-  
+  boostedMetrics: BoostedMetrics | null;
+  setBoostedMetrics: (m: BoostedMetrics | null) => void;
+
   // PERSISTED ANALYSIS HISTORY
   fairnessLogs: string[];
   setFairnessLogs: (l: string[] | ((prev: string[]) => string[])) => void;
@@ -55,6 +68,10 @@ interface DataContextType {
   setModelLogs: (l: string[] | ((prev: string[]) => string[])) => void;
   selectionStep: number;
   setSelectionStep: (s: number) => void;
+  datasetDescription: string | null;
+  setDatasetDescription: (desc: string | null) => void;
+  boosterLogs: string[];
+  setBoosterLogs: (l: string[] | ((prev: string[]) => string[])) => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -69,10 +86,25 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [debiasedDataset, setDebiasedDataset] = useState<DatasetInfo | null>(null);
   const [targetColumn, setTargetColumn] = useState<string | null>(null);
-  const [sensitiveColumn, setSensitiveColumn] = useState<string | null>(null);
+  const [sensitiveColumns, setSensitiveColumnsState] = useState<string[]>([]);
+  const [sensitiveColumn, setSensitiveColumnState] = useState<string | null>(null);
+  const [datasetDescription, setDatasetDescription] = useState<string | null>(null);
+  const [boosterLogs, setBoosterLogs] = useState<string[]>([]);
+
+  const setSensitiveColumn = (c: string | null) => {
+    setSensitiveColumnState(c);
+    setSensitiveColumnsState(c ? [c] : []);
+  };
+
+  const setSensitiveColumns = (cols: string[]) => {
+    setSensitiveColumnsState(cols);
+    setSensitiveColumnState(cols[0] || null);
+  };
+
   const [safeList, setSafeList] = useState<string[]>([]);
   const [darkMode, setDarkMode] = useState(true);
   const [modelResults, setModelResults] = useState<any | null>(null);
+  const [boostedMetrics, setBoostedMetrics] = useState<BoostedMetrics | null>(null);
 
   // HISTORY STATE
   const [fairnessLogs, setFairnessLogs] = useState<string[]>([]);
@@ -98,6 +130,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       setSelectionStep(0);
       setDebiasedDataset(null);
       setModelResults(null);
+      setBoostedMetrics(null);
+      setSensitiveColumnsState([]);
+      setSensitiveColumnState(null);
+      setDatasetDescription(null);
+      setBoosterLogs([]);
     }
   };
 
@@ -107,13 +144,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       debiasedDataset, setDebiasedDataset,
       targetColumn, setTargetColumn, 
       sensitiveColumn, setSensitiveColumn,
+      sensitiveColumns, setSensitiveColumns,
       safeList, setSafeList, toggleSafeColumn,
       darkMode, setDarkMode,
       modelResults, setModelResults,
+      boostedMetrics, setBoostedMetrics,
       fairnessLogs, setFairnessLogs,
       scanComplete, setScanComplete,
       modelLogs, setModelLogs,
-      selectionStep, setSelectionStep
+      selectionStep, setSelectionStep,
+      datasetDescription, setDatasetDescription,
+      boosterLogs, setBoosterLogs
     }}>
       {children}
     </DataContext.Provider>
