@@ -19,4 +19,16 @@ export default defineConfig(({ mode }) => ({
     },
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query", "@tanstack/query-core"],
   },
+  optimizeDeps: {
+    include: [
+      "ml-random-forest",
+      "ml-knn",
+      "ml-confusion-matrix",
+      "ml-logistic-regression",
+      "ml-matrix",
+      "ml-regression-multivariate-linear",
+      "papaparse",
+      "xlsx"
+    ]
+  },
 }));
