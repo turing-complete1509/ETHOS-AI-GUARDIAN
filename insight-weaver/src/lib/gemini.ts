@@ -13,7 +13,7 @@ export async function generateBiasReport(metrics: any, fairnessStats: any) {
       return "Configuration Error: VITE_GEMINI_API_KEY is missing. Please check your .env file and ensure Vite has picked it up.";
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
     const prompt = `
       You are an Ethical AI Auditor. Analyze the following model results and fairness metrics:
@@ -54,7 +54,7 @@ export async function getPipelineInsights(datasetDescription: string | null, sta
     const genAI = getGenAI();
     if (!genAI) return null;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
     const prompt = `
       You are an AI Data Scientist assisting with an automated machine learning pipeline.
